@@ -6,10 +6,12 @@
 //! public API. It edits nothing upstream.
 //!
 //! Add [`UnitsPlugin`] after `WorldPlugins`, spawn [`UnitBody`] with a `Transform` and a
-//! `Visibility`, and watch its [`BodyState`]. Its [`ClipDriver`] takes `AnimationData` ids.
+//! `Visibility`, and watch its [`BodyState`]. Its [`ClipDriver`] takes `AnimationData` ids. A body is
+//! a creature display or a player's race, sex and dials.
 
 mod body;
 mod clips;
+mod composite;
 mod look;
 mod tables;
 
@@ -18,23 +20,31 @@ use bevy::prelude::*;
 
 pub use body::{BodyCards, BodyFacts, BodyState, CardOf, UnitBody, attachment_point};
 pub use clips::{ANIM_STAND, Arm, ClipDriver, ClipEnd};
-pub use look::{CreatureLook, PartSkin, creature_look, is_character_model, model_dir, part_skin};
+pub use look::{
+    CharacterDials, CreatureLook, PartSkin, character_look, creature_look, dressed_look,
+    is_character_model, model_dir, part_skin,
+};
 pub use tables::UnitTables;
 
 /// Where bodies are dressed and their clips started each frame, for a caller to order itself against.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UnitsSet;
 
-/// Loads the display tables at startup, dresses every [`UnitBody`] as its files arrive, and starts
-/// the clips its [`ClipDriver`] asks for.
+/// Loads the display tables at startup, composites body skins off the main thread, dresses every
+/// [`UnitBody`] as its files arrive, and starts the clips its [`ClipDriver`] asks for.
 pub struct UnitsPlugin;
 
 impl Plugin for UnitsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, tables::load_tables.after(AssetSet::Open))
+        app.init_resource::<composite::SkinComposites>()
+            .add_systems(Startup, tables::load_tables.after(AssetSet::Open))
             .add_systems(
                 Update,
-                (body::dress_bodies, clips::drive_clips)
+                (
+                    composite::land_skin_composites,
+                    body::dress_bodies,
+                    clips::drive_clips,
+                )
                     .chain()
                     .in_set(UnitsSet),
             );

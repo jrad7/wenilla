@@ -2,7 +2,9 @@
 
 use benilla_assets::coords::wow_to_bevy;
 use benilla_assets::materials::WowModelMaterial;
-use benilla_assets::{M2Model, ModelAttachment, ModelSubmesh, m2_url, skin_url, texture_url};
+use benilla_assets::{
+    M2Model, ModelAttachment, ModelSubmesh, WorldAssets, m2_url, skin_url, texture_url,
+};
 use benilla_formats::{ModelBlend, NpcAppearance, VisibleGeosets};
 use benilla_world::billboard::BillboardCard;
 use benilla_world::doodad_anim::{MatAnim, UvAnimMaterials};
@@ -25,7 +27,11 @@ use bevy::mesh::MeshTag;
 use bevy::prelude::*;
 
 use crate::clips::ClipDriver;
-use crate::look::{CreatureLook, PartSkin, creature_look, model_dir, npc_geosets, part_skin};
+use crate::composite::{BodyAtlas, SkinComposites, SkinKey, composite_plan, work};
+use crate::look::{
+    CharacterDials, CreatureLook, PartSkin, character_look, composited, creature_look, model_dir,
+    npc_geosets, part_skin,
+};
 use crate::tables::UnitTables;
 
 /// What the client sets on a character texture's sampler: both axes clamp.
@@ -33,26 +39,49 @@ const CHAR_TEXTURE_WRAP: (bool, bool) = (false, false);
 
 /// The creature table, when a body asks and no client was opened.
 const NO_TABLES: &str = "DBFilesClient/CreatureDisplayInfo.dbc";
+/// The race table, when a character has no body there.
+const NO_RACE: &str = "DBFilesClient/ChrRaces.dbc";
+/// The skin table, when a body has no composite.
+const NO_SKIN: &str = "DBFilesClient/CharSections.dbc";
+
+/// What a body was asked to be.
+enum BodySource {
+    Display(u32),
+    Character(CharacterDials),
+}
 
 /// A body standing in the world. Put it on a root with a `Transform` and a `Visibility`: the root's
 /// translation and rotation stay the caller's, and dressing sets its scale from the display.
 #[derive(Component)]
 #[require(ClipDriver)]
 pub struct UnitBody {
-    display: u32,
+    source: BodySource,
     state: BodyState,
     look: Option<CreatureLook>,
     model: Option<Handle<M2Model>>,
+    /// A composited body's skin, once it has landed.
+    atlas: Option<Handle<Image>>,
 }
 
 impl UnitBody {
     /// A `CreatureDisplayInfo.dbc` id.
     pub fn creature(display: u32) -> Self {
+        Self::of(BodySource::Display(display))
+    }
+
+    /// A player's body: the race's display, its skin composited from these dials. It draws nothing
+    /// until the composite lands, as the client does for a unit's first.
+    pub fn character(dials: CharacterDials) -> Self {
+        Self::of(BodySource::Character(dials))
+    }
+
+    fn of(source: BodySource) -> Self {
         Self {
-            display,
+            source,
             state: BodyState::Loading,
             look: None,
             model: None,
+            atlas: None,
         }
     }
 
@@ -114,6 +143,8 @@ pub(crate) struct Dressing<'w, 's> {
     uv_reg: ResMut<'w, UvAnimMaterials>,
     anim_table: ResMut<'w, MatAnimTable>,
     tables: Option<Res<'w, UnitTables>>,
+    composites: ResMut<'w, SkinComposites>,
+    assets: Option<Res<'w, WorldAssets>>,
 }
 
 pub(crate) fn dress_bodies(
@@ -143,11 +174,23 @@ impl Dressing<'_, '_> {
             let Some(tables) = self.tables.as_ref() else {
                 return Some(BodyState::Failed(NO_TABLES.to_owned()));
             };
-            let Some(look) = creature_look(&tables.creatures, body.display) else {
-                return Some(BodyState::Failed(format!(
-                    "{NO_TABLES} (no display {})",
-                    body.display
-                )));
+            let look = match body.source {
+                BodySource::Display(display) => creature_look(&tables.creatures, display)
+                    .ok_or_else(|| format!("{NO_TABLES} (no display {display})")),
+                BodySource::Character(dials) => tables
+                    .create
+                    .as_ref()
+                    .and_then(|create| character_look(&tables.creatures, create, dials))
+                    .ok_or_else(|| {
+                        format!(
+                            "{NO_RACE} (no body for race {} sex {})",
+                            dials.race, dials.sex
+                        )
+                    }),
+            };
+            let look = match look {
+                Ok(look) => look,
+                Err(failed) => return Some(BodyState::Failed(failed)),
             };
             body.model = Some(self.server.load(m2_url(&look.model_path)));
             transform.scale = Vec3::splat(look.scale);
@@ -157,12 +200,40 @@ impl Dressing<'_, '_> {
         if let Some(LoadState::Failed(_)) = self.server.get_load_state(handle.id()) {
             return Some(BodyState::Failed(look.model_path.clone()));
         }
+        if body.atlas.is_none()
+            && let Some(npc) = composited(look)
+        {
+            let key = SkinKey::of(npc);
+            match self.atlas(key) {
+                BodyAtlas::Pending => return None,
+                BodyAtlas::Ready(Some(atlas)) => body.atlas = Some(atlas),
+                BodyAtlas::Ready(None) => {
+                    return Some(BodyState::Failed(format!(
+                        "{NO_SKIN} (no body skin for race {} sex {} skin {})",
+                        key.race, key.sex, key.skin
+                    )));
+                }
+            }
+        }
         // No shared light buffer yet means no materials to build.
         if !self.mats.ready() {
             return None;
         }
         let model = m2s.get(handle)?;
-        Some(BodyState::Ready(self.dress(root, look, handle, model)))
+        let atlas = body.atlas.as_ref();
+        Some(BodyState::Ready(
+            self.dress(root, look, handle, model, atlas),
+        ))
+    }
+
+    /// A look's composite: done, or running, its work started here on a miss.
+    fn atlas(&mut self, key: SkinKey) -> BodyAtlas {
+        let (tables, assets) = (self.tables.as_ref(), self.assets.as_ref());
+        self.composites.request(key, || {
+            let tables = tables?;
+            let plan = composite_plan(&key, tables.sections.as_ref()?, tables.items.as_ref())?;
+            Some(work(plan, assets?.chain.clone()))
+        })
     }
 
     fn dress(
@@ -171,6 +242,7 @@ impl Dressing<'_, '_> {
         look: &CreatureLook,
         handle: &Handle<M2Model>,
         model: &M2Model,
+        atlas: Option<&Handle<Image>>,
     ) -> BodyFacts {
         // Uncapped, like the client's one-off lanes: a handful of models at most.
         self.forms
@@ -219,6 +291,7 @@ impl Dressing<'_, '_> {
                     index,
                     slot,
                     center,
+                    atlas,
                 };
                 self.spawn_part(look, &batch, pose.as_mut());
             }
@@ -252,10 +325,16 @@ impl Dressing<'_, '_> {
         look: &CreatureLook,
         sub: &ModelSubmesh,
         index: usize,
+        atlas: Option<&Handle<Image>>,
     ) -> Option<BatchVariants> {
         let sections = self.tables.as_ref().and_then(|t| t.sections.as_ref());
         let appearance = look.npc.as_ref();
         let skin = part_skin(look, sub.char_slot, sub.skin_slot, sub.texture.is_some());
+        if let (PartSkin::Composite, Some(atlas)) = (skin, atlas) {
+            return self
+                .mats
+                .char_variants(atlas.clone(), ModelBlend::Opaque, sub.two_sided);
+        }
         let char_path = match skin {
             PartSkin::Baked(name) => Some(format!("Textures\\BakedNpcTextures\\{name}")),
             PartSkin::Hair => appearance
@@ -270,7 +349,7 @@ impl Dressing<'_, '_> {
                     sections.skin_extra_texture(npc.race, npc.sex, npc.skin)
                 })
                 .map(str::to_owned),
-            PartSkin::Embedded | PartSkin::Creature(_) => None,
+            PartSkin::Embedded | PartSkin::Creature(_) | PartSkin::Composite => None,
         };
         if let Some(path) = char_path {
             let texture = self.server.load(texture_url(&path, CHAR_TEXTURE_WRAP));
@@ -306,8 +385,9 @@ impl Dressing<'_, '_> {
             index,
             slot,
             center,
+            atlas,
         } = *batch;
-        let Some(variants) = self.variants(look, sub, index) else {
+        let Some(variants) = self.variants(look, sub, index, atlas) else {
             return;
         };
         let built = self.forms.slices(handle);
@@ -387,6 +467,7 @@ struct Batch<'a> {
     index: usize,
     slot: u16,
     center: Vec3,
+    atlas: Option<&'a Handle<Image>>,
 }
 
 /// Loops the model's idle, until its [`ClipDriver`] asks for another clip.

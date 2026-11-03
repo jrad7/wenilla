@@ -2,13 +2,13 @@
 
 use benilla_assets::WorldAssets;
 use benilla_formats::{
-    AnimDataCatalog, Chain, CharSections, CharacterGeosets, CreatureCatalog, ItemDisplayCatalog,
-    load_anim_data_catalog, load_creature_catalog, load_item_display_catalog,
+    AnimDataCatalog, Chain, CharCreateCatalog, CharSections, CharacterGeosets, CreatureCatalog,
+    ItemDisplayCatalog, load_anim_data_catalog, load_creature_catalog, load_item_display_catalog,
 };
 use bevy::prelude::*;
 
 /// The tables, read once. Only the creature catalog is essential: without the others a humanoid
-/// draws every geoset, or an untextured hair, rather than nothing.
+/// draws every geoset, or an untextured hair, rather than nothing, and a character body fails.
 #[derive(Resource)]
 pub struct UnitTables {
     pub creatures: CreatureCatalog,
@@ -16,6 +16,8 @@ pub struct UnitTables {
     pub sections: Option<CharSections>,
     pub items: Option<ItemDisplayCatalog>,
     pub animations: Option<AnimDataCatalog>,
+    /// Race and sex to a body display.
+    pub create: Option<CharCreateCatalog>,
 }
 
 impl UnitTables {
@@ -26,6 +28,7 @@ impl UnitTables {
             sections: optional("char sections", CharSections::load(chain)),
             items: optional("item displays", load_item_display_catalog(chain)),
             animations: optional("animation data", load_anim_data_catalog(chain)),
+            create: optional("character creation", CharCreateCatalog::load(chain)),
         })
     }
 }
