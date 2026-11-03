@@ -70,8 +70,21 @@ pub fn wow_data() -> Option<PathBuf> {
     Some(PathBuf::from("/data"))
 }
 
+/// The install a program embedding the engine chose ([`set_data_dir`]); `Some(None)` is no install.
+static CHOSEN_DATA: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+/// Fix the install for this process, ending the search: a program embedding the engine keeps its
+/// own configuration and does not want the ladder or `$WOW_DATA` consulted. `None` means no
+/// install. The entry point calls this once, before anything resolves; a later call changes nothing.
+pub fn set_data_dir(dir: Option<PathBuf>) {
+    let _ = CHOSEN_DATA.set(dir);
+}
+
 /// Every place [`wow_data`] looks, in order, whether or not it exists, for a "looked in" message.
 pub fn candidates() -> Vec<PathBuf> {
+    if let Some(chosen) = CHOSEN_DATA.get() {
+        return chosen.iter().cloned().collect();
+    }
     candidates_from(
         std::env::var_os("WOW_DATA").map(PathBuf::from),
         project_folder(),
