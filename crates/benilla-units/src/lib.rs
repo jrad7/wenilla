@@ -6,9 +6,10 @@
 //! public API. It edits nothing upstream.
 //!
 //! Add [`UnitsPlugin`] after `WorldPlugins`, spawn [`UnitBody`] with a `Transform` and a
-//! `Visibility`, and watch its [`BodyState`].
+//! `Visibility`, and watch its [`BodyState`]. Its [`ClipDriver`] takes `AnimationData` ids.
 
 mod body;
+mod clips;
 mod look;
 mod tables;
 
@@ -16,19 +17,26 @@ use benilla_assets::AssetSet;
 use bevy::prelude::*;
 
 pub use body::{BodyCards, BodyFacts, BodyState, CardOf, UnitBody, attachment_point};
+pub use clips::{ANIM_STAND, Arm, ClipDriver, ClipEnd};
 pub use look::{CreatureLook, PartSkin, creature_look, is_character_model, model_dir, part_skin};
 pub use tables::UnitTables;
 
-/// Where bodies are dressed each frame, for a caller to order itself against.
+/// Where bodies are dressed and their clips started each frame, for a caller to order itself against.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UnitsSet;
 
-/// Loads the display tables at startup and dresses every [`UnitBody`] as its files arrive.
+/// Loads the display tables at startup, dresses every [`UnitBody`] as its files arrive, and starts
+/// the clips its [`ClipDriver`] asks for.
 pub struct UnitsPlugin;
 
 impl Plugin for UnitsPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, tables::load_tables.after(AssetSet::Open))
-            .add_systems(Update, body::dress_bodies.in_set(UnitsSet));
+            .add_systems(
+                Update,
+                (body::dress_bodies, clips::drive_clips)
+                    .chain()
+                    .in_set(UnitsSet),
+            );
     }
 }

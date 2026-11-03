@@ -2,8 +2,8 @@
 
 use benilla_assets::WorldAssets;
 use benilla_formats::{
-    Chain, CharSections, CharacterGeosets, CreatureCatalog, ItemDisplayCatalog,
-    load_creature_catalog, load_item_display_catalog,
+    AnimDataCatalog, Chain, CharSections, CharacterGeosets, CreatureCatalog, ItemDisplayCatalog,
+    load_anim_data_catalog, load_creature_catalog, load_item_display_catalog,
 };
 use bevy::prelude::*;
 
@@ -15,6 +15,7 @@ pub struct UnitTables {
     pub geosets: Option<CharacterGeosets>,
     pub sections: Option<CharSections>,
     pub items: Option<ItemDisplayCatalog>,
+    pub animations: Option<AnimDataCatalog>,
 }
 
 impl UnitTables {
@@ -24,6 +25,7 @@ impl UnitTables {
             geosets: optional("character geosets", CharacterGeosets::load(chain)),
             sections: optional("char sections", CharSections::load(chain)),
             items: optional("item displays", load_item_display_catalog(chain)),
+            animations: optional("animation data", load_anim_data_catalog(chain)),
         })
     }
 }

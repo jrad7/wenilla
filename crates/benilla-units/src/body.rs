@@ -17,12 +17,14 @@ use benilla_world::model_render::{
 use benilla_world::rig_anim::{GlobalSeqDrive, RigPose};
 use benilla_world::rig_palette::{RigPalettes, RigPart, RigSkin};
 use bevy::animation::graph::AnimationGraphHandle;
+use bevy::animation::transition::AnimationTransitions;
 use bevy::asset::LoadState;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::ecs::system::SystemParam;
 use bevy::mesh::MeshTag;
 use bevy::prelude::*;
 
+use crate::clips::ClipDriver;
 use crate::look::{CreatureLook, PartSkin, creature_look, model_dir, npc_geosets, part_skin};
 use crate::tables::UnitTables;
 
@@ -35,6 +37,7 @@ const NO_TABLES: &str = "DBFilesClient/CreatureDisplayInfo.dbc";
 /// A body standing in the world. Put it on a root with a `Transform` and a `Visibility`: the root's
 /// translation and rotation stay the caller's, and dressing sets its scale from the display.
 #[derive(Component)]
+#[require(ClipDriver)]
 pub struct UnitBody {
     display: u32,
     state: BodyState,
@@ -386,7 +389,7 @@ struct Batch<'a> {
     center: Vec3,
 }
 
-/// Loops the model's idle, the one clip a body plays until something asks for another.
+/// Loops the model's idle, until its [`ClipDriver`] asks for another clip.
 fn arm_idle(
     commands: &mut Commands,
     root: Entity,
@@ -395,12 +398,16 @@ fn arm_idle(
     rigged: bool,
 ) {
     let mut player = AnimationPlayer::default();
+    let mut transitions = AnimationTransitions::new();
     if let Some(idle) = anims.idle_clip() {
-        player.play(idle.node).repeat();
+        transitions
+            .play(&mut player, idle.node, std::time::Duration::ZERO)
+            .repeat();
     }
     let mut entity = commands.entity(root);
     entity.insert((
         player,
+        transitions,
         AnimationGraphHandle(anims.graph.clone()),
         anims.clone(),
     ));

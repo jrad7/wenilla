@@ -17,6 +17,11 @@ its scale from the display. Watch `UnitBody::state()`: `Loading`, then `Ready(Bo
   `Textures\BakedNpcTextures\`, hair and fringe from `CharSections`, geosets from its armor columns.
 - A looping idle on the engine's rig, indoor lighting (`InteriorLit`), billboard cards following
   their joints and despawning with the body (`BodyCards`).
+- A `ClipDriver`: `play(animation_data_id, ClipEnd::Loop | Stand | Hold)`, over the clip's authored
+  cross-fade. The id goes through the model's own substitutes, and one it has no clip for plays Stand.
+  Requests made while the model loads wait, and the latest wins. `benilla-app`'s driver holds
+  23k lines for a live unit; this is about 150, plus tests, because a program that names its clips
+  needs little of what that does.
 
 ## What it does not have yet
 
@@ -24,7 +29,8 @@ Compared with `benilla-app`'s `entities`:
 
 - A humanoid with no bake name draws its fallback body, as the live composite is not here.
 - Helm and shoulder models, and held weapons. NPC bakes include their armor, but those models attach.
-- Clip choice beyond the idle.
+- Clip choice of its own: gait from speed, locomotion blending, precast, upper-body masks, sheathing,
+  variation rolls and replay counts (the head variation plays, once).
 - Particle emitters, ribbons and carried lights.
 - Appear fades, `WorldUnit` (so no water ripples, and a body is never culled by a sealed room), and
   per-instance animated materials (`mark_mat_anim`).
