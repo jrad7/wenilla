@@ -1,0 +1,14 @@
+[package]
+name = "benilla-units"
+description = "Units for an embedding program: a display id to a body standing in benilla-world, with no game attached."
+version.workspace = true
+edition = "2024"
+license.workspace = true
+publish = false
+
+[dependencies]
+anyhow = "1"
+benilla-assets = { path = "../benilla-assets", default-features = false }
+benilla-formats = { path = "../benilla-formats", default-features = false }
+benilla-world = { path = "../benilla-world", default-features = false }
+bevy.workspace = true

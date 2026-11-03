@@ -925,6 +925,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "benilla-units"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "benilla-assets",
+ "benilla-formats",
+ "benilla-world",
+ "bevy",
+]
+
+[[package]]
 name = "benilla-visual"
 version = "0.3.0"
 dependencies = [
