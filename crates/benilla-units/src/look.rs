@@ -1,5 +1,7 @@
 //! What a display looks like, as plain data, so the rules are testable with no GPU and no client.
 
+use crate::gear::Worn;
+
 use benilla_formats::{
     CharCreateCatalog, CharSkinSlot, CreatureCatalog, EquipGeosets, ItemDisplay,
     ItemDisplayCatalog, NpcAppearance, forearm_dressed,
@@ -16,6 +18,19 @@ pub struct CreatureLook {
     pub skins: [Option<String>; 3],
     /// A humanoid's body, from `CreatureDisplayInfoExtra`.
     pub npc: Option<NpcAppearance>,
+    /// What an item's object batches wear, a bare name beside the model.
+    pub object_texture: Option<String>,
+}
+
+/// A bare model at its file's scale: an item or a spell's effect.
+pub(crate) fn prop_look(model_path: String, object_texture: Option<String>) -> CreatureLook {
+    CreatureLook {
+        model_path,
+        scale: 1.0,
+        skins: [None, None, None],
+        npc: None,
+        object_texture,
+    }
 }
 
 /// `None` for an unknown display or a zero-scale row, both of which the client draws as nothing.
@@ -26,6 +41,7 @@ pub fn creature_look(catalog: &CreatureCatalog, display_id: u32) -> Option<Creat
         scale: model.scale,
         skins: model.textures,
         npc: model.npc_appearance,
+        object_texture: None,
     })
 }
 
@@ -46,13 +62,18 @@ pub fn character_look(
     creatures: &CreatureCatalog,
     create: &CharCreateCatalog,
     dials: CharacterDials,
+    worn: &Worn,
 ) -> Option<CreatureLook> {
     let display = create.body_display(dials.race, dials.sex)?;
-    Some(dressed_look(creature_look(creatures, display)?, dials))
+    Some(dressed_look(
+        creature_look(creatures, display)?,
+        dials,
+        worn,
+    ))
 }
 
-/// A body display's look with the dials on, as an unbaked NPC with nothing worn.
-pub fn dressed_look(body: CreatureLook, dials: CharacterDials) -> CreatureLook {
+/// A body display's look with the dials on, as an unbaked NPC wearing `worn`'s columns.
+pub fn dressed_look(body: CreatureLook, dials: CharacterDials, worn: &Worn) -> CreatureLook {
     CreatureLook {
         npc: Some(NpcAppearance {
             race: dials.race,
@@ -62,7 +83,7 @@ pub fn dressed_look(body: CreatureLook, dials: CharacterDials) -> CreatureLook {
             hair_style: dials.hair_style,
             hair_color: dials.hair_color,
             facial_hair: dials.facial_hair,
-            equipment: [0; 10],
+            equipment: worn.equipment,
             bake_name: None,
         }),
         ..body
@@ -133,6 +154,11 @@ pub fn part_skin(
             Some(CharSkinSlot::Object) | None => {}
         }
     }
+    if char_slot == Some(CharSkinSlot::Object)
+        && let Some(name) = look.object_texture.as_deref()
+    {
+        return PartSkin::Creature(name);
+    }
     if embedded {
         return PartSkin::Embedded;
     }
@@ -190,6 +216,7 @@ mod tests {
             scale: 1.0,
             skins: [Some("Skin0".to_owned()), None, Some("Skin2".to_owned())],
             npc,
+            object_texture: None,
         }
     }
 
@@ -277,7 +304,7 @@ mod tests {
             scale: 1.35,
             ..look("Character\\Tauren\\Female\\TaurenFemale.mdx", None)
         };
-        let dressed = dressed_look(body, dials);
+        let dressed = dressed_look(body, dials, &Worn::default());
         assert_eq!(dressed.scale, 1.35);
         let npc = composited(&dressed).expect("composited");
         assert_eq!((npc.race, npc.sex, npc.skin, npc.face), (6, 1, 2, 3));
@@ -300,7 +327,8 @@ mod tests {
                     sex,
                     ..CharacterDials::default()
                 };
-                let found = character_look(&catalog, &create, dials).expect("look");
+                let found =
+                    character_look(&catalog, &create, dials, &Worn::default()).expect("look");
                 assert!(
                     is_character_model(&found.model_path),
                     "{}",
@@ -363,6 +391,17 @@ mod tests {
             part_skin(&odd, Some(CharSkinSlot::Body), Some(0), false),
             PartSkin::Creature("Skin0")
         );
+    }
+
+    // An item's batches wear what its display row names, never a guess from the file.
+    #[test]
+    fn an_object_slot_wears_the_items_texture() {
+        let sword = prop_look("Item\\Sword.m2".to_owned(), Some("Sword_Blue".to_owned()));
+        assert_eq!(
+            part_skin(&sword, Some(CharSkinSlot::Object), None, false),
+            PartSkin::Creature("Sword_Blue")
+        );
+        assert_eq!(part_skin(&sword, None, None, true), PartSkin::Embedded);
     }
 
     #[test]

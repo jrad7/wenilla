@@ -7,12 +7,16 @@
 //!
 //! Add [`UnitsPlugin`] after `WorldPlugins`, spawn [`UnitBody`] with a `Transform` and a
 //! `Visibility`, and watch its [`BodyState`]. Its [`ClipDriver`] takes `AnimationData` ids. A body is
-//! a creature display or a player's race, sex and dials.
+//! a creature display or a player's race, sex and dials, or a bare model, which is how a worn item
+//! and a spell's effect stand; [`SeatOn`] hangs one from a body's attachment.
 
 mod body;
 mod clips;
 mod composite;
+mod fx;
+mod gear;
 mod look;
+mod seat;
 mod tables;
 
 use benilla_assets::AssetSet;
@@ -20,10 +24,13 @@ use bevy::prelude::*;
 
 pub use body::{BodyCards, BodyFacts, BodyState, CardOf, UnitBody, attachment_point};
 pub use clips::{ANIM_STAND, Arm, ClipDriver, ClipEnd};
+pub use fx::{ATTACH_FALLBACKS, kit_effects, missile_effect};
+pub use gear::Worn;
 pub use look::{
     CharacterDials, CreatureLook, PartSkin, character_look, creature_look, dressed_look,
     is_character_model, model_dir, part_skin,
 };
+pub use seat::SeatOn;
 pub use tables::UnitTables;
 
 /// Where bodies are dressed and their clips started each frame, for a caller to order itself against.
@@ -42,6 +49,7 @@ impl Plugin for UnitsPlugin {
                 Update,
                 (
                     composite::land_skin_composites,
+                    seat::seat_riders,
                     body::dress_bodies,
                     clips::drive_clips,
                 )

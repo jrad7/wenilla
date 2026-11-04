@@ -23,6 +23,13 @@ its scale from the display. Watch `UnitBody::state()`: `Loading`, then `Ready(Bo
   which fails the body.
 - A looping idle on the engine's rig, indoor lighting (`InteriorLit`), billboard cards following
   their joints and despawning with the body (`BodyCards`).
+- Worn gear (`UnitBody::character_wearing(dials, Worn)`, or an NPC's own columns): armor painted into
+  the composite and shaping the geosets, and the helm, both shoulders and the main hand's weapon stood
+  on it as riders. A helm's file is chosen by race and sex.
+- A `SeatOn { wearer, points }` hangs any body from the first attachment its wearer authors, else from
+  the root, following the live bone, and goes with the wearer. Dressing waits for the seat.
+- `UnitBody::prop(path, texture)` is a bare model, and `UnitBody::effect(path)` one with its particles
+  and ribbons. `missile_effect` and `kit_effects` read `SpellVisual` rows to the models to stand.
 - A `ClipDriver`: `play(animation_data_id, ClipEnd::Loop | Stand | Hold)`, over the clip's authored
   cross-fade. The id goes through the model's own substitutes, and one it has no clip for plays Stand.
   Requests made while the model loads wait, and the latest wins. `benilla-app`'s driver holds
@@ -33,9 +40,13 @@ its scale from the display. Watch `UnitBody::state()`: `Loading`, then `Ready(Bo
 
 Compared with `benilla-app`'s `entities`:
 
-- A player's worn armor: `CharacterDials` has no equipment yet. Guild emblems, the composite's forced
-  lane for previews and its distance sweep: the atlases stay cached for the process's life.
-- Helm and shoulder models, and held weapons. NPC bakes include their armor, but those models attach.
+- On a worn body: a cloak (`CreatureDisplayInfoExtra` has no column), an off-hand, a shield, a ranged
+  weapon, ammo or a quiver; sheathing, since a weapon is always drawn; item glows and enchant trails;
+  a worn item's own particles. Worn gear is fixed at spawn, so changing it means a new body. Guild
+  emblems, the composite's forced lane for previews and its distance sweep: the atlases stay cached
+  for the process's life.
+- On an effect: stages (`CEffect`'s birth, hold and decay), ground decals, sounds, launch and cast kits,
+  beam kits, a thrown weapon's in-flight clip. `UnitBody::effect` just loops the model's idle.
 - Clip choice of its own: gait from speed, locomotion blending, precast, upper-body masks, sheathing,
   variation rolls and replay counts (the head variation plays, once).
 - Particle emitters, ribbons and carried lights.

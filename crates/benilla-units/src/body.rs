@@ -16,6 +16,8 @@ use benilla_world::model_forms::ModelForms;
 use benilla_world::model_render::{
     BatchVariants, EntityUvLane, M2BatchMaterials, ModelKind, ModelPart,
 };
+use benilla_world::particles::{self, EmitClock, EmitterFrames, OwnerLoss};
+use benilla_world::ribbons::{self, RibbonSeq};
 use benilla_world::rig_anim::{GlobalSeqDrive, RigPose};
 use benilla_world::rig_palette::{RigPalettes, RigPart, RigSkin};
 use bevy::animation::graph::AnimationGraphHandle;
@@ -28,10 +30,12 @@ use bevy::prelude::*;
 
 use crate::clips::ClipDriver;
 use crate::composite::{BodyAtlas, SkinComposites, SkinKey, composite_plan, work};
+use crate::gear::{Worn, npc_riders};
 use crate::look::{
     CharacterDials, CreatureLook, PartSkin, character_look, composited, creature_look, model_dir,
-    npc_geosets, part_skin,
+    npc_geosets, part_skin, prop_look,
 };
+use crate::seat::SeatOn;
 use crate::tables::UnitTables;
 
 /// What the client sets on a character texture's sampler: both axes clamp.
@@ -47,7 +51,14 @@ const NO_SKIN: &str = "DBFilesClient/CharSections.dbc";
 /// What a body was asked to be.
 enum BodySource {
     Display(u32),
-    Character(CharacterDials),
+    Character(CharacterDials, Worn),
+    /// A bare model: a worn item, or a spell's effect.
+    Model {
+        path: String,
+        texture: Option<String>,
+        /// Draw its particles and ribbons.
+        fx: bool,
+    },
 }
 
 /// A body standing in the world. Put it on a root with a `Transform` and a `Visibility`: the root's
@@ -72,7 +83,33 @@ impl UnitBody {
     /// A player's body: the race's display, its skin composited from these dials. It draws nothing
     /// until the composite lands, as the client does for a unit's first.
     pub fn character(dials: CharacterDials) -> Self {
-        Self::of(BodySource::Character(dials))
+        Self::character_wearing(dials, Worn::default())
+    }
+
+    /// A player's body wearing these item displays: the armor is painted into its composite and
+    /// shapes its geosets, and the helm, shoulders and weapon stand on it as riders ([`SeatOn`]).
+    pub fn character_wearing(dials: CharacterDials, worn: Worn) -> Self {
+        Self::of(BodySource::Character(dials, worn))
+    }
+
+    /// A bare model at its file's own scale: `texture` is what its object batches wear, a bare
+    /// name beside the model.
+    pub fn prop(path: impl Into<String>, texture: Option<String>) -> Self {
+        Self::of(BodySource::Model {
+            path: path.into(),
+            texture,
+            fx: false,
+        })
+    }
+
+    /// A spell's model, with its particles and ribbons, looping its idle. Despawning it stops the
+    /// emitters, and what they have already thrown ages out on its own.
+    pub fn effect(path: impl Into<String>) -> Self {
+        Self::of(BodySource::Model {
+            path: path.into(),
+            texture: None,
+            fx: true,
+        })
     }
 
     fn of(source: BodySource) -> Self {
@@ -148,7 +185,8 @@ pub(crate) struct Dressing<'w, 's> {
 }
 
 pub(crate) fn dress_bodies(
-    mut bodies: Query<(Entity, &mut UnitBody, &mut Transform)>,
+    // A rider waits for its seat, or it would stand at the origin until then.
+    mut bodies: Query<(Entity, &mut UnitBody, &mut Transform), Without<SeatOn>>,
     m2s: Res<Assets<M2Model>>,
     mut dressing: Dressing,
 ) {
@@ -156,6 +194,12 @@ pub(crate) fn dress_bodies(
         if matches!(body.state, BodyState::Loading)
             && let Some(state) = dressing.step(root, &mut body, &mut transform, &m2s)
         {
+            // Nobody watches a worn item, so its failure is said here, and the wearer stands on.
+            if let (BodyState::Failed(path), BodySource::Model { fx: false, .. }) =
+                (&state, &body.source)
+            {
+                warn!("worn item {path} failed");
+            }
             body.state = state;
         }
     }
@@ -174,13 +218,16 @@ impl Dressing<'_, '_> {
             let Some(tables) = self.tables.as_ref() else {
                 return Some(BodyState::Failed(NO_TABLES.to_owned()));
             };
-            let look = match body.source {
-                BodySource::Display(display) => creature_look(&tables.creatures, display)
+            let look = match &body.source {
+                BodySource::Display(display) => creature_look(&tables.creatures, *display)
                     .ok_or_else(|| format!("{NO_TABLES} (no display {display})")),
-                BodySource::Character(dials) => tables
+                BodySource::Model { path, texture, .. } => {
+                    Ok(prop_look(path.clone(), texture.clone()))
+                }
+                BodySource::Character(dials, worn) => tables
                     .create
                     .as_ref()
-                    .and_then(|create| character_look(&tables.creatures, create, dials))
+                    .and_then(|create| character_look(&tables.creatures, create, *dials, worn))
                     .ok_or_else(|| {
                         format!(
                             "{NO_RACE} (no body for race {} sex {})",
@@ -221,9 +268,14 @@ impl Dressing<'_, '_> {
         }
         let model = m2s.get(handle)?;
         let atlas = body.atlas.as_ref();
-        Some(BodyState::Ready(
-            self.dress(root, look, handle, model, atlas),
-        ))
+        let fx = matches!(body.source, BodySource::Model { fx: true, .. });
+        let main_hand = match body.source {
+            BodySource::Character(_, worn) => worn.main_hand,
+            _ => 0,
+        };
+        let facts = self.dress(root, look, handle, model, atlas, fx);
+        self.spawn_riders(root, look, main_hand);
+        Some(BodyState::Ready(facts))
     }
 
     /// A look's composite: done, or running, its work started here on a miss.
@@ -243,6 +295,7 @@ impl Dressing<'_, '_> {
         handle: &Handle<M2Model>,
         model: &M2Model,
         atlas: Option<&Handle<Image>>,
+        fx: bool,
     ) -> BodyFacts {
         // Uncapped, like the client's one-off lanes: a handful of models at most.
         self.forms
@@ -296,6 +349,9 @@ impl Dressing<'_, '_> {
                 self.spawn_part(look, &batch, pose.as_mut());
             }
         }
+        if fx {
+            self.spawn_fx(root, model, pose.as_mut());
+        }
         if let Some(pose) = pose {
             self.commands.entity(root).insert(pose);
         }
@@ -304,6 +360,74 @@ impl Dressing<'_, '_> {
             height: model
                 .bounds
                 .map_or(0.0, |b| (b.bbox_max[2] - b.bbox_min[2]).max(0.0)),
+        }
+    }
+
+    /// A humanoid's helm, shoulders and weapon, each its own body waiting for its seat.
+    fn spawn_riders(&mut self, root: Entity, look: &CreatureLook, main_hand: u32) {
+        let Some(npc) = look.npc.as_ref() else {
+            return;
+        };
+        let riders = self.tables.as_ref().map_or_else(Vec::new, |tables| {
+            npc_riders(npc, main_hand, tables.items.as_ref(), tables.races.as_ref())
+        });
+        for rider in riders {
+            self.commands.spawn((
+                Transform::default(),
+                Visibility::default(),
+                UnitBody::prop(rider.path, rider.texture),
+                SeatOn {
+                    wearer: root,
+                    points: vec![rider.attach],
+                },
+            ));
+        }
+    }
+
+    /// An effect's particles and ribbons, each riding its bone's live anchor, as `benilla-app`'s
+    /// `spell_fx` hangs them on its joints. Losing the owner stops the emitter and lets its pool age
+    /// out, since a spell's model is over when it is over.
+    fn spawn_fx(&mut self, root: Entity, model: &M2Model, mut pose: Option<&mut RigPose>) {
+        // The clock is the model's own player when it has clips, which `arm_idle` has started.
+        let clock = if model.animations.is_some() {
+            EmitClock::Host(root)
+        } else {
+            EmitClock::Pinned
+        };
+        for emitter in &model.emitters {
+            let owner = pose
+                .as_deref_mut()
+                .and_then(|pose| pose.anchor_for(&mut self.commands, root, emitter.def.bone))
+                .map_or((root, [0.0; 3]), |joint| (joint, emitter.bone_pivot));
+            particles::spawn_emitter(
+                &mut self.commands,
+                emitter,
+                Transform::IDENTITY,
+                EmitterFrames {
+                    owner: Some(owner),
+                    // The cloud sorts at the model; the bone only places births.
+                    anchor: Some(root),
+                    alpha: Some(root),
+                    light_node: None,
+                    on_owner_loss: OwnerLoss::Drain,
+                },
+                clock,
+            );
+        }
+        for ribbon in &model.ribbons {
+            let joint = pose
+                .as_deref_mut()
+                .and_then(|pose| pose.anchor_for(&mut self.commands, root, ribbon.def.bone));
+            ribbons::spawn_ribbon(
+                &mut self.commands,
+                ribbon,
+                joint.unwrap_or(root),
+                joint.is_some(),
+                1.0,
+                RibbonSeq::Host(root),
+                Some(root),
+                None,
+            );
         }
     }
 

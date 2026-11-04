@@ -2,8 +2,9 @@
 
 use benilla_assets::WorldAssets;
 use benilla_formats::{
-    AnimDataCatalog, Chain, CharCreateCatalog, CharSections, CharacterGeosets, CreatureCatalog,
-    ItemDisplayCatalog, load_anim_data_catalog, load_creature_catalog, load_item_display_catalog,
+    AnimDataCatalog, Chain, CharCreateCatalog, CharSections, CharacterGeosets, ChrRaces,
+    CreatureCatalog, ItemDisplayCatalog, SpellVisualCatalog, load_anim_data_catalog,
+    load_chr_races, load_creature_catalog, load_item_display_catalog, load_spell_visual_catalog,
 };
 use bevy::prelude::*;
 
@@ -18,6 +19,10 @@ pub struct UnitTables {
     pub animations: Option<AnimDataCatalog>,
     /// Race and sex to a body display.
     pub create: Option<CharCreateCatalog>,
+    /// A race's file prefix, which a helm's model name carries.
+    pub races: Option<ChrRaces>,
+    /// `SpellVisual` and its kits to effect models.
+    pub visuals: Option<SpellVisualCatalog>,
 }
 
 impl UnitTables {
@@ -29,6 +34,8 @@ impl UnitTables {
             items: optional("item displays", load_item_display_catalog(chain)),
             animations: optional("animation data", load_anim_data_catalog(chain)),
             create: optional("character creation", CharCreateCatalog::load(chain)),
+            races: optional("races", load_chr_races(chain)),
+            visuals: optional("spell visuals", load_spell_visual_catalog(chain)),
         })
     }
 }
