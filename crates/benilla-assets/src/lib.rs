@@ -205,7 +205,7 @@ impl MpqAssetReader {
         let url = format!(
             "{}/{}",
             benilla_formats::web::data_base(),
-            benilla_formats::web::encode_name(name)
+            benilla_formats::web::data_path(name)
         );
         match wasm_fetch(&url).await {
             Ok(bytes) => Ok(Some(bytes)),

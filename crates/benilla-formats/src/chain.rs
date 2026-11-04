@@ -342,7 +342,7 @@ impl Chain {
 
     /// The chain file's Data URL scheme address — the client half of the Lane A ↔ Lane H contract.
     fn url_for(&self, name: &str) -> String {
-        format!("{}/{}", self.base, crate::web::encode_name(name))
+        format!("{}/{}", self.base, crate::web::data_path(name))
     }
 
     /// The index's key for a name: MPQ hashing's equivalence — case-insensitive, `/` ≡ `\`.

@@ -27,6 +27,27 @@ pub fn encode_name(name: &str) -> String {
     out
 }
 
+/// The file a static export keeps chain name `name` in, relative to the data root: lower case and
+/// `/`-separated. An MPQ name has no case and either separator, and the engine asks for one file in
+/// several spellings, so a file server that matches bytes needs the one spelling.
+pub fn static_name(name: &str) -> String {
+    name.replace('\\', "/").to_ascii_lowercase()
+}
+
+/// What goes after the data root in a request for chain name `name`. wenilla's host takes the
+/// encoded name as one component; with `static-data`, a plain file server takes a real path.
+pub fn data_path(name: &str) -> String {
+    if cfg!(feature = "static-data") {
+        static_name(name)
+            .split('/')
+            .map(encode_name)
+            .collect::<Vec<_>>()
+            .join("/")
+    } else {
+        encode_name(name)
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 mod wasm {
     use wasm_bindgen::JsValue;

@@ -3,7 +3,23 @@
 //! URL scheme (Lane A ↔ Lane H), and a mismatch with the host's decode would silently 404 every
 //! chain name with a space, backslash, or other reserved byte in it.
 
-use benilla_formats::web::encode_name;
+use benilla_formats::web::{data_path, encode_name, static_name};
+
+#[test]
+fn a_static_name_has_one_spelling() {
+    assert_eq!(static_name(r"World\WMO\a B.wmo"), "world/wmo/a b.wmo");
+    assert_eq!(static_name("world/WMO\\a b.WMO"), "world/wmo/a b.wmo");
+}
+
+#[test]
+fn a_request_follows_the_static_data_feature() {
+    let want = if cfg!(feature = "static-data") {
+        "world/wmo/a%20b.wmo"
+    } else {
+        "World%5CWMO%5Ca%20b.wmo"
+    };
+    assert_eq!(data_path(r"World\WMO\a b.wmo"), want);
+}
 
 #[test]
 fn matches_the_data_url_schemes_worked_example() {

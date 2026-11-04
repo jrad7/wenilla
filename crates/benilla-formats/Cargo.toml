@@ -14,6 +14,9 @@ workspace = true
 # forwards `dev`, or unification puts the path back into a player build.
 default = ["dev"]
 dev = []
+# idle's carry: the web build asks for a file by its plain path, for a static file server, where
+# wenilla's asks `wenilla-host` by its encoded name. See `web::data_path`.
+static-data = []
 
 [dependencies]
 anyhow.workspace = true
