@@ -363,10 +363,11 @@ impl Chain {
             .as_ref()
     }
 
-    /// Whether the web host has `name` — from the name index when it loaded, else a `HEAD`
-    /// request (no body).
+    /// Whether the web host has `name` — from the name index when it loaded, else the page's
+    /// preload map, else a `HEAD` request (no body).
     pub fn contains(&self, name: &str) -> bool {
         match self.index() {
+            None if crate::web::is_preloaded(&Self::index_key(name)) => true,
             Some(set) => set.contains(&Self::index_key(name)),
             None => crate::web::exists_sync(&self.url_for(name)),
         }
@@ -391,6 +392,10 @@ impl Chain {
             .is_some_and(|set| !set.contains(&Self::index_key(name)))
         {
             return Err(anyhow!("file not in patch chain: {name}"));
+        }
+        // Bytes the page fetched before `init()`, in parallel: no request (`web::take_preloaded`).
+        if let Some(bytes) = crate::web::take_preloaded(&Self::index_key(name)) {
+            return Ok(bytes);
         }
         crate::web::fetch_sync(&self.url_for(name)).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {

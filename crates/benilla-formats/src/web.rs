@@ -92,6 +92,47 @@ mod wasm {
         });
     }
 
+    /// The page's preload map, `globalThis.__idlePreload`: an object from a chain index key (see
+    /// `Chain::index_key`) to an `ArrayBuffer` the page fetched before `init()`, many at once. A
+    /// page without one costs one snapshotted `Reflect::get` for the session, as [`trace`] does.
+    fn preload_map() -> Option<js_sys::Object> {
+        use wasm_bindgen::JsCast;
+        thread_local! {
+            static MAP: std::cell::OnceCell<Option<js_sys::Object>> =
+                const { std::cell::OnceCell::new() };
+        }
+        MAP.with(|cell| {
+            cell.get_or_init(|| {
+                js_sys::Reflect::get(&js_sys::global(), &"__idlePreload".into())
+                    .ok()?
+                    .dyn_into::<js_sys::Object>()
+                    .ok()
+            })
+            .clone()
+        })
+    }
+
+    /// The bytes the page preloaded under index key `key`, taken out of the map so the page's copy
+    /// is freed as the engine reads; `None` (and a request as before) when it holds none.
+    pub fn take_preloaded(key: &str) -> Option<Vec<u8>> {
+        use wasm_bindgen::JsCast;
+        let map = preload_map()?;
+        let key = JsValue::from_str(key);
+        let buffer = js_sys::Reflect::get(&map, &key)
+            .ok()?
+            .dyn_into::<js_sys::ArrayBuffer>()
+            .ok()?;
+        let _ = js_sys::Reflect::delete_property(&map, &key);
+        Some(js_sys::Uint8Array::new(&buffer).to_vec())
+    }
+
+    /// Whether the page preloaded `key` and the engine has not read it yet.
+    pub fn is_preloaded(key: &str) -> bool {
+        preload_map().is_some_and(|map| {
+            js_sys::Reflect::has(&map, &JsValue::from_str(key)).unwrap_or(false)
+        })
+    }
+
     /// A blocking `XMLHttpRequest` GET, returning the raw response bytes.
     ///
     /// Synchronous on purpose: [`crate::Chain::read`] is called from Bevy systems on the main
@@ -148,4 +189,4 @@ mod wasm {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub use wasm::{data_base, exists_sync, fetch_sync, trace};
+pub use wasm::{data_base, exists_sync, fetch_sync, is_preloaded, take_preloaded, trace};
