@@ -24,7 +24,9 @@ use bevy::prelude::*;
 
 pub use body::{BodyCards, BodyFacts, BodyState, CardOf, UnitBody, attachment_point};
 pub use clips::{ANIM_STAND, Arm, ClipDriver, ClipEnd};
-pub use fx::{ATTACH_FALLBACKS, kit_effects, missile_effect};
+pub use fx::{
+    ANIM_DECAY, ANIM_HOLD, ATTACH_FALLBACKS, EffectLife, EffectStage, kit_effects, missile_effect,
+};
 pub use gear::{
     ATTACH_HAND_LEFT, ATTACH_HAND_RIGHT, ATTACH_SHIELD, Cape, Drawn, Held, Worn, WornBy, WornSlot,
     held_folder,
@@ -56,6 +58,7 @@ impl Plugin for UnitsPlugin {
                     body::dress_bodies,
                     gear::show_drawn,
                     clips::drive_clips,
+                    fx::live_effects,
                 )
                     .chain()
                     .in_set(UnitsSet),
