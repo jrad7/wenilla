@@ -1,6 +1,6 @@
 //! What a display looks like, as plain data, so the rules are testable with no GPU and no client.
 
-use crate::gear::Worn;
+use crate::gear::{Cape, Worn};
 
 use benilla_formats::{
     CharCreateCatalog, CharSkinSlot, CreatureCatalog, EquipGeosets, ItemDisplay,
@@ -20,6 +20,8 @@ pub struct CreatureLook {
     pub npc: Option<NpcAppearance>,
     /// What an item's object batches wear, a bare name beside the model.
     pub object_texture: Option<String>,
+    /// A character's cloak: its cape geoset, and what the body's object batches wear.
+    pub cape: Option<Cape>,
 }
 
 /// A bare model at its file's scale: an item or a spell's effect.
@@ -30,6 +32,7 @@ pub(crate) fn prop_look(model_path: String, object_texture: Option<String>) -> C
         skins: [None, None, None],
         npc: None,
         object_texture,
+        cape: None,
     }
 }
 
@@ -42,6 +45,7 @@ pub fn creature_look(catalog: &CreatureCatalog, display_id: u32) -> Option<Creat
         skins: model.textures,
         npc: model.npc_appearance,
         object_texture: None,
+        cape: None,
     })
 }
 
@@ -127,6 +131,8 @@ pub enum PartSkin<'a> {
     Hair,
     /// A furred race's extra skin (`CharSkinSlot::SkinExtra`).
     SkinExtra,
+    /// A character's cloak on its object batches: this file under `Item\ObjectComponents\Cape`.
+    Cape(&'a str),
 }
 
 /// A batch's texture. A humanoid's body slots read its appearance, and a plain creature's read its
@@ -151,7 +157,12 @@ pub fn part_skin(
             }
             Some(CharSkinSlot::Hair) => return PartSkin::Hair,
             Some(CharSkinSlot::SkinExtra) => return PartSkin::SkinExtra,
-            Some(CharSkinSlot::Object) | None => {}
+            Some(CharSkinSlot::Object) => {
+                if let Some(cape) = &look.cape {
+                    return PartSkin::Cape(&cape.texture);
+                }
+            }
+            None => {}
         }
     }
     if char_slot == Some(CharSkinSlot::Object)
@@ -169,9 +180,16 @@ pub fn part_skin(
 }
 
 /// A humanoid NPC's worn geoset inputs: its extra row's columns are `ItemDisplayInfo` ids, 2 to 9
-/// the armor and 0 the helm. It has no cloak column.
-pub(crate) fn npc_geosets(npc: &NpcAppearance, items: Option<&ItemDisplayCatalog>) -> EquipGeosets {
-    let mut geosets = EquipGeosets::default();
+/// the armor and 0 the helm. It has no cloak column, so a character's cloak comes as `cape`.
+pub(crate) fn npc_geosets(
+    npc: &NpcAppearance,
+    cape: Option<&Cape>,
+    items: Option<&ItemDisplayCatalog>,
+) -> EquipGeosets {
+    let mut geosets = EquipGeosets {
+        cloak: cape.map(|cape| cape.geoset),
+        ..EquipGeosets::default()
+    };
     let Some(items) = items else {
         return geosets;
     };
@@ -217,6 +235,7 @@ mod tests {
             skins: [Some("Skin0".to_owned()), None, Some("Skin2".to_owned())],
             npc,
             object_texture: None,
+            cape: None,
         }
     }
 
@@ -273,6 +292,36 @@ mod tests {
             PartSkin::Composite
         );
         assert!(composited(&npc).is_some());
+    }
+
+    #[test]
+    fn a_characters_cloak_dresses_its_object_batches_and_a_weapons_texture_stays() {
+        let mut body = look(
+            "Character\\Human\\Male\\HumanMale.mdx",
+            Some(appearance(None)),
+        );
+        let object = Some(CharSkinSlot::Object);
+        assert_eq!(part_skin(&body, object, None, true), PartSkin::Embedded);
+        body.cape = Some(Cape {
+            geoset: 2,
+            texture: "Cape_Cloth_A_02Gold".to_owned(),
+        });
+        assert_eq!(
+            part_skin(&body, object, None, true),
+            PartSkin::Cape("Cape_Cloth_A_02Gold")
+        );
+        assert_eq!(
+            npc_geosets(body.npc.as_ref().expect("npc"), body.cape.as_ref(), None).cloak,
+            Some(2)
+        );
+        let mut sword = look("Item\\ObjectComponents\\Weapon\\Sword.m2", None);
+        sword.object_texture = Some("SwordSkin".to_owned());
+        sword.cape = body.cape.clone();
+        assert_eq!(
+            part_skin(&sword, object, None, true),
+            PartSkin::Creature("SwordSkin"),
+            "only a character model wears a cape"
+        );
     }
 
     #[test]
@@ -419,7 +468,7 @@ mod tests {
     fn with_no_item_table_a_humanoid_is_naked() {
         let mut npc = appearance(None);
         npc.equipment = [7; 10];
-        let geosets = npc_geosets(&npc, None);
+        let geosets = npc_geosets(&npc, None, None);
         assert!(geosets.bodyslots.iter().all(Option::is_none));
         assert!(geosets.helm_vis.is_none());
     }

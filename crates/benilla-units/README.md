@@ -24,8 +24,16 @@ its scale from the display. Watch `UnitBody::state()`: `Loading`, then `Ready(Bo
 - A looping idle on the engine's rig, indoor lighting (`InteriorLit`), billboard cards following
   their joints and despawning with the body (`BodyCards`).
 - Worn gear (`UnitBody::character_wearing(dials, Worn)`, or an NPC's own columns): armor painted into
-  the composite and shaping the geosets, and the helm, both shoulders and the main hand's weapon stood
-  on it as riders. A helm's file is chosen by race and sex.
+  the composite and shaping the geosets, a cloak on the body's cape geoset and object batches, and the
+  helm and both shoulders stood on it as riders. A helm's file is chosen by race and sex.
+- Held items (`Held`: main hand, off-hand, ranged), on a character through `Worn` or on any creature
+  through `UnitBody::creature_holding(display, Held)`: the main hand's in the right hand, an off-hand
+  shield on the forearm and any other off-hand item in the left, a bow in the left and any other
+  ranged item in the right, as the client draws them. A shield is known by its model's name
+  (`held_folder`), since a display row has no inventory type. A held item stands only where the
+  model authors its point. `Drawn` on the root says which show: `Melee` (the default) shows the
+  pair, `Ranged` the ranged item, which 1.12 shows only while drawn. Every rider carries `WornBy`,
+  so a caller can find one that failed.
 - A `SeatOn { wearer, points }` hangs any body from the first attachment its wearer authors, else from
   the root, following the live bone, and goes with the wearer. Dressing waits for the seat.
 - `UnitBody::prop(path, texture)` is a bare model, and `UnitBody::effect(path)` one with its particles
@@ -40,9 +48,9 @@ its scale from the display. Watch `UnitBody::state()`: `Loading`, then `Ready(Bo
 
 Compared with `benilla-app`'s `entities`:
 
-- On a worn body: a cloak (`CreatureDisplayInfoExtra` has no column), an off-hand, a shield, a ranged
-  weapon, ammo or a quiver; sheathing, since a weapon is always drawn; item glows and enchant trails;
-  a worn item's own particles. Worn gear is fixed at spawn, so changing it means a new body. Guild
+- On a worn body: ammo or a quiver; sheathing, since a held item is drawn or hidden, never stowed on
+  the back or hip (that needs the item's sheath type); an NPC's cloak, which `CreatureDisplayInfoExtra`
+  has no column for; item glows and enchant trails; a worn item's own particles. Worn gear is fixed at spawn, so changing it means a new body. Guild
   emblems, the composite's forced lane for previews and its distance sweep: the atlases stay cached
   for the process's life.
 - On an effect: stages (`CEffect`'s birth, hold and decay), ground decals, sounds, launch and cast kits,

@@ -25,7 +25,10 @@ use bevy::prelude::*;
 pub use body::{BodyCards, BodyFacts, BodyState, CardOf, UnitBody, attachment_point};
 pub use clips::{ANIM_STAND, Arm, ClipDriver, ClipEnd};
 pub use fx::{ATTACH_FALLBACKS, kit_effects, missile_effect};
-pub use gear::Worn;
+pub use gear::{
+    ATTACH_HAND_LEFT, ATTACH_HAND_RIGHT, ATTACH_SHIELD, Cape, Drawn, Held, Worn, WornBy, WornSlot,
+    held_folder,
+};
 pub use look::{
     CharacterDials, CreatureLook, PartSkin, character_look, creature_look, dressed_look,
     is_character_model, model_dir, part_skin,
@@ -51,6 +54,7 @@ impl Plugin for UnitsPlugin {
                     composite::land_skin_composites,
                     seat::seat_riders,
                     body::dress_bodies,
+                    gear::show_drawn,
                     clips::drive_clips,
                 )
                     .chain()

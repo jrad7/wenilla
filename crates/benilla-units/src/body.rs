@@ -30,7 +30,7 @@ use bevy::prelude::*;
 
 use crate::clips::ClipDriver;
 use crate::composite::{BodyAtlas, SkinComposites, SkinKey, composite_plan, work};
-use crate::gear::{Worn, npc_riders};
+use crate::gear::{CAPE_DIR, Cape, Held, Worn, WornBy, WornSlot, cape, held_riders, npc_riders};
 use crate::look::{
     CharacterDials, CreatureLook, PartSkin, character_look, composited, creature_look, model_dir,
     npc_geosets, part_skin, prop_look,
@@ -50,7 +50,7 @@ const NO_SKIN: &str = "DBFilesClient/CharSections.dbc";
 
 /// What a body was asked to be.
 enum BodySource {
-    Display(u32),
+    Display(u32, Held),
     Character(CharacterDials, Worn),
     /// A bare model: a worn item, or a spell's effect.
     Model {
@@ -77,7 +77,12 @@ pub struct UnitBody {
 impl UnitBody {
     /// A `CreatureDisplayInfo.dbc` id.
     pub fn creature(display: u32) -> Self {
-        Self::of(BodySource::Display(display))
+        Self::creature_holding(display, Held::default())
+    }
+
+    /// A creature holding these item displays, each where its model authors the hand ([`Held`]).
+    pub fn creature_holding(display: u32, held: Held) -> Self {
+        Self::of(BodySource::Display(display, held))
     }
 
     /// A player's body: the race's display, its skin composited from these dials. It draws nothing
@@ -87,7 +92,8 @@ impl UnitBody {
     }
 
     /// A player's body wearing these item displays: the armor is painted into its composite and
-    /// shapes its geosets, and the helm, shoulders and weapon stand on it as riders ([`SeatOn`]).
+    /// shapes its geosets, the cloak dresses its cape, and the helm, shoulders and held items stand
+    /// on it as riders ([`SeatOn`]), each marked [`WornBy`].
     pub fn character_wearing(dials: CharacterDials, worn: Worn) -> Self {
         Self::of(BodySource::Character(dials, worn))
     }
@@ -219,7 +225,7 @@ impl Dressing<'_, '_> {
                 return Some(BodyState::Failed(NO_TABLES.to_owned()));
             };
             let look = match &body.source {
-                BodySource::Display(display) => creature_look(&tables.creatures, *display)
+                BodySource::Display(display, _) => creature_look(&tables.creatures, *display)
                     .ok_or_else(|| format!("{NO_TABLES} (no display {display})")),
                 BodySource::Model { path, texture, .. } => {
                     Ok(prop_look(path.clone(), texture.clone()))
@@ -228,6 +234,10 @@ impl Dressing<'_, '_> {
                     .create
                     .as_ref()
                     .and_then(|create| character_look(&tables.creatures, create, *dials, worn))
+                    .map(|look| CreatureLook {
+                        cape: cape(worn.back, tables.items.as_ref()),
+                        ..look
+                    })
                     .ok_or_else(|| {
                         format!(
                             "{NO_RACE} (no body for race {} sex {})",
@@ -269,12 +279,13 @@ impl Dressing<'_, '_> {
         let model = m2s.get(handle)?;
         let atlas = body.atlas.as_ref();
         let fx = matches!(body.source, BodySource::Model { fx: true, .. });
-        let main_hand = match body.source {
-            BodySource::Character(_, worn) => worn.main_hand,
-            _ => 0,
+        let held = match &body.source {
+            BodySource::Display(_, held) => *held,
+            BodySource::Character(_, worn) => worn.held,
+            BodySource::Model { .. } => Held::default(),
         };
         let facts = self.dress(root, look, handle, model, atlas, fx);
-        self.spawn_riders(root, look, main_hand);
+        self.spawn_riders(root, look, &held, &facts);
         Some(BodyState::Ready(facts))
     }
 
@@ -331,7 +342,10 @@ impl Dressing<'_, '_> {
             arm_idle(&mut self.commands, root, anims, bones, slot != 0);
         }
 
-        let visible = look.npc.as_ref().and_then(|npc| self.visible_geosets(npc));
+        let visible = look
+            .npc
+            .as_ref()
+            .and_then(|npc| self.visible_geosets(npc, look.cape.as_ref()));
         for (index, sub) in model.submeshes.iter().enumerate() {
             let hidden = visible
                 .as_ref()
@@ -363,22 +377,38 @@ impl Dressing<'_, '_> {
         }
     }
 
-    /// A humanoid's helm, shoulders and weapon, each its own body waiting for its seat.
-    fn spawn_riders(&mut self, root: Entity, look: &CreatureLook, main_hand: u32) {
-        let Some(npc) = look.npc.as_ref() else {
+    /// A humanoid's helm and shoulders, and any body's held items, each its own body waiting for
+    /// its seat. A held item whose point the model does not author is left off; a ranged one starts
+    /// hidden, until [`Drawn`](crate::Drawn) says otherwise.
+    fn spawn_riders(&mut self, root: Entity, look: &CreatureLook, held: &Held, facts: &BodyFacts) {
+        let Some(tables) = self.tables.as_ref() else {
             return;
         };
-        let riders = self.tables.as_ref().map_or_else(Vec::new, |tables| {
-            npc_riders(npc, main_hand, tables.items.as_ref(), tables.races.as_ref())
+        let mut riders = look.npc.as_ref().map_or_else(Vec::new, |npc| {
+            npc_riders(npc, tables.items.as_ref(), tables.races.as_ref())
         });
+        riders.extend(
+            held_riders(held, tables.items.as_ref())
+                .into_iter()
+                .filter(|rider| facts.attachments.iter().any(|a| a.id == rider.attach)),
+        );
         for rider in riders {
+            let visibility = if rider.slot == WornSlot::Ranged {
+                Visibility::Hidden
+            } else {
+                Visibility::Inherited
+            };
             self.commands.spawn((
                 Transform::default(),
-                Visibility::default(),
+                visibility,
                 UnitBody::prop(rider.path, rider.texture),
                 SeatOn {
                     wearer: root,
                     points: vec![rider.attach],
+                },
+                WornBy {
+                    wearer: root,
+                    slot: rider.slot,
                 },
             ));
         }
@@ -431,9 +461,9 @@ impl Dressing<'_, '_> {
         }
     }
 
-    fn visible_geosets(&self, npc: &NpcAppearance) -> Option<VisibleGeosets> {
+    fn visible_geosets(&self, npc: &NpcAppearance, cape: Option<&Cape>) -> Option<VisibleGeosets> {
         let tables = self.tables.as_ref()?;
-        let equip = npc_geosets(npc, tables.items.as_ref());
+        let equip = npc_geosets(npc, cape, tables.items.as_ref());
         Some(tables.geosets.as_ref()?.visible_geosets(
             npc.race,
             npc.sex,
@@ -459,6 +489,11 @@ impl Dressing<'_, '_> {
                 .mats
                 .char_variants(atlas.clone(), ModelBlend::Opaque, sub.two_sided);
         }
+        // As `benilla-app`'s `char_skin` binds it: the plain file, at the batch's own blend.
+        if let PartSkin::Cape(name) = skin {
+            let texture = self.server.load(skin_url(CAPE_DIR, name));
+            return self.mats.char_variants(texture, sub.blend, sub.two_sided);
+        }
         let char_path = match skin {
             PartSkin::Baked(name) => Some(format!("Textures\\BakedNpcTextures\\{name}")),
             PartSkin::Hair => appearance
@@ -473,7 +508,10 @@ impl Dressing<'_, '_> {
                     sections.skin_extra_texture(npc.race, npc.sex, npc.skin)
                 })
                 .map(str::to_owned),
-            PartSkin::Embedded | PartSkin::Creature(_) | PartSkin::Composite => None,
+            PartSkin::Embedded
+            | PartSkin::Creature(_)
+            | PartSkin::Composite
+            | PartSkin::Cape(_) => None,
         };
         if let Some(path) = char_path {
             let texture = self.server.load(texture_url(&path, CHAR_TEXTURE_WRAP));
