@@ -44,6 +44,12 @@ its scale from the display. Watch `UnitBody::state()`: `Loading`, then `Ready(Bo
   23k lines for a live unit; this is about 150, plus tests, because a program that names its clips
   needs little of what that does.
 
+- A spell's beam (`ChainBeam`, from `benilla-app`'s `chain_beam.rs`): a kit's chain proc
+  (`kit_beam`) from a caster's body through other bodies, one ribbon per hop, subdivided, jittered,
+  advected and scrolled as the client draws it, in the effect lane. A cast-stage beam burns hop by
+  hop and ends itself; a channel's lasts until despawned or its caster goes. A hop whose body is
+  not dressed or not shown is not drawn.
+
 ## What it does not have yet
 
 Compared with `benilla-app`'s `entities`:
@@ -53,8 +59,11 @@ Compared with `benilla-app`'s `entities`:
   has no column for; item glows and enchant trails; a worn item's own particles. Worn gear is fixed at spawn, so changing it means a new body. Guild
   emblems, the composite's forced lane for previews and its distance sweep: the atlases stay cached
   for the process's life.
-- On an effect: stages (`CEffect`'s birth, hold and decay), ground decals, sounds, launch and cast kits,
-  beam kits, a thrown weapon's in-flight clip. `UnitBody::effect` just loops the model's idle.
+- On an effect: ground decals, sounds, launch kits, a thrown weapon's in-flight clip. (Stages came
+  with `EffectLife`.)
+- On a beam (`ChainBeam`): the caster's `$CSL` marker (its end is its right hand, else its left, else
+  the client's fallback of three quarters of the model's height), and a channel's re-targeting; a beam runs through the bodies it
+  was given until it ends.
 - Clip choice of its own: gait from speed, locomotion blending, precast, upper-body masks, sheathing,
   variation rolls and replay counts (the head variation plays, once).
 - Particle emitters, ribbons and carried lights.

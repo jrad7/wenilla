@@ -8,8 +8,10 @@
 //! Add [`UnitsPlugin`] after `WorldPlugins`, spawn [`UnitBody`] with a `Transform` and a
 //! `Visibility`, and watch its [`BodyState`]. Its [`ClipDriver`] takes `AnimationData` ids. A body is
 //! a creature display or a player's race, sex and dials, or a bare model, which is how a worn item
-//! and a spell's effect stand; [`SeatOn`] hangs one from a body's attachment.
+//! and a spell's effect stand; [`SeatOn`] hangs one from a body's attachment. A [`ChainBeam`] runs a
+//! spell's beam from one body through others.
 
+mod beam;
 mod body;
 mod clips;
 mod composite;
@@ -22,6 +24,7 @@ mod tables;
 use benilla_assets::AssetSet;
 use bevy::prelude::*;
 
+pub use beam::{CHAIN_ATTACH_FALLBACK, ChainBeam, beam_attachment, kit_beam};
 pub use body::{BodyCards, BodyFacts, BodyState, CardOf, UnitBody, attachment_point};
 pub use clips::{ANIM_STAND, Arm, ClipDriver, ClipEnd};
 pub use fx::{
@@ -62,6 +65,16 @@ impl Plugin for UnitsPlugin {
                 )
                     .chain()
                     .in_set(UnitsSet),
+            )
+            // A beam's ends are attachment points at the pose the rig finalizer just wrote, and the
+            // effect stream is cleared by `begin_effect_frame`, so it draws after both.
+            .add_systems(
+                PostUpdate,
+                beam::draw_beams
+                    .in_set(benilla_world::billboard::BillboardPlace)
+                    .after(benilla_world::billboard::billboard_joint_palette)
+                    .after(benilla_world::rig_anim::finalize_rig_worlds)
+                    .after(benilla_world::particles::buffer::begin_effect_frame),
             );
     }
 }
