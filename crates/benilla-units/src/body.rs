@@ -148,6 +148,10 @@ pub struct BodyFacts {
     pub attachments: Vec<ModelAttachment>,
     /// The authored box's height in model-local yards, before the root's scale.
     pub height: f32,
+    /// The Stand sequence's box height in model-local yards, before the root's scale: how tall
+    /// the model stands (the reference's chat-bubble anchor, `M2Bounds::stand_box_z`); 0.0 when
+    /// the file has no bounds. `height` spans every animation and is far taller.
+    pub stand_height: f32,
 }
 
 /// A billboard card belongs to its body but is a world root, as the billboard system requires, so
@@ -374,6 +378,7 @@ impl Dressing<'_, '_> {
             height: model
                 .bounds
                 .map_or(0.0, |b| (b.bbox_max[2] - b.bbox_min[2]).max(0.0)),
+            stand_height: model.bounds.map_or(0.0, |b| b.stand_box_z.max(0.0)),
         }
     }
 
